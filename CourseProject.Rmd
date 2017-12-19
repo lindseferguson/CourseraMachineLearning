@@ -1,0 +1,95 @@
+---
+title: "Understanding How Well an Exercise is Done with Machine Learning"
+output:
+  html_document: default
+---
+## Executive Summary
+
+Wearable technology has become extremely popluar for individuals to track how much activity they are performing in their everyday life.  Rarely though does a person quantify how well they perform an activity with their wearable tech.  To dig into this further, the below analysis will build a predictive model from data collected during a [weightlifting exercise](http://groupware.les.inf.puc-rio.br/har) where 6 participants were asked to perform dumbell bicep curls correctly and incorrectly in 5 different ways.  The model will allow us to understand if the data collected by all the sensors is enough to determine how a person is performing the exercise.  
+
+## Exploratory Analysis
+
+First we will look at the training data set provided and understand what information has been included.  
+
+```{r}
+library(knitr)
+train <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+test <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+str(train)
+```
+
+There are a total of 19622 observtions and 160 variables in the training data set.  The first 7 columns include time stamps, participant name and some other pieces of information that are not important for creating a model.  These columns will be removed before any modelling is done.  
+
+There are also a number of columns that have NA values in them which will not work with the caret package.  On the website where this data is pulled from there is a paper called "Qualitative Activity Recognition of Weight Lifting Exercises" that explains the data set in detail.  In section 5.1 it explains that a feature selection algorithm was run on the raw data and the columns with amplitude, min, max, avg, stddev, var, kurtosis or skewness in the name, also the ones with NA values, are calculations based off the raw data.  In this analysis we are concerned only with the raw data collected so these columns will also be removed.  
+
+```{r}
+trainSub <- train[, !grepl("amplitude|min|max|avg|stddev|var|kurtosis|skewness", names(train))]
+trainSub <- trainSub[,8:60]
+```
+
+The next thing to look at it is whether the data will require any preprocessing.  
+
+```{r}
+means <- colMeans(trainSub[,-53])
+sd <- apply(trainSub, 2, sd)
+par(mfrow=c(1,2))
+plot(means, main="Predictor Means", ylab="Mean")
+plot(sd, main="Predictor Standard Deviations", ylab="Standard Deviation")
+```
+
+The above graphs show that there are a number of predictors in the data set that have a large mean and standard deviation.  This means some of the data is skewed and highly variable which can trick the model when it is created.  To accomodate for this the data will be centered and scaled prior to any model fitting.  The next check is to see if any of the variables are highly correlated with each other.
+
+```{r}
+M <- abs(cor(trainSub[,-53]))
+diag(M) <- 0
+which(M > 0.8, arr.ind=T)
+```
+
+The above matrix indicates that there are a lot of variables in the data set that have strong correlations with each other.  This is not surprising as the same measurements were taken just in different directions (x, y and z plane).  To account for this, principle component analysis will be applied to the data when creating the model.  
+
+## Model Fitting
+
+Now that the data is understood, we will start with creating a random forest model in caret with centering, scalaing and PCA preprocessing.  The data will as undergo a 10 k-fold cross validation as well so the out of sample error rate can be understood.
+
+```{r, cache=TRUE, warning=FALSE}
+library(caret)
+
+set.seed(100)
+fitControl <- trainControl(method = "cv", number = 10)
+fit <- train(classe ~., data = trainSub, preProcess = c("center", "scale", "pca"), method="rf", trControl=fitControl)
+
+fit
+```
+
+```{r}
+plot(fit)
+```
+
+The above plot of the model shows that we can get the highest accuracy (over 98%) with 2 variables at each split of the tree.
+
+Lastly, looking at the Final Model of fit, we can see that the out of sample error rate is 1.61%.
+
+```{r}
+fit$finalModel
+```
+
+With this low out of sample error rate and high accuracy we can conclude that the random forest model generated in the above model fitting provides a good estimate of the data.  This is the final model that will be used for prediction of future test cases.
+
+##Prediction of Test Cases
+
+With the final model developed above and the test data set provided in the assignment, the same data tidying will be applied as was done with the training set and it will then be analyzed with the model to estimate the classe.
+
+```{r}
+testSub <- test[, !grepl("amplitude|min|max|avg|stddev|var|kurtosis|skewness", names(test))]
+testSub <- testSub[,8:60]
+
+pred <- predict(fit, newdata=testSub)
+
+testSub$classe <- pred
+```
+
+The classes for the test data are as follows.
+
+```{r}
+pred
+```
